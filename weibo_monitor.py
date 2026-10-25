@@ -6,10 +6,8 @@ import json
 import os
 from datetime import datetime, timedelta
 
-JSON_FILE = "cloud_data.json"
-TARGET_NAMES = ["苏新皓", "朱志鑫", "陈奕恒", "王橹杰"]
+# ================= 配置区（4人已填好） =================
 
-# ================= 配置区（已填入完整 URL） =================
 # 1. 苏新皓
 SU_XINHAO_CONFIG = {
     "name": "苏新皓",
@@ -139,65 +137,84 @@ WANG_LUJIE_CONFIG = {
 }
 
 TOPICS_CONFIG = [SU_XINHAO_CONFIG, ZHU_ZHIXIN_CONFIG, CHEN_YIHENG_CONFIG, WANG_LUJIE_CONFIG]
-# ==========================================================
+JSON_FILE = "cloud_data.json"
 
-def fetch_count(topic):
-    """抓取单个人的超like人数"""
+# ==========================================
+
+def get_count_from_topic(topic):
+    """发送请求并提取单个超话的精确人数"""
     try:
-        res = requests.post(topic["url"], headers=topic["headers"], data=topic["payload"], timeout=15)
-        if res.status_code != 200: 
+        response = requests.post(topic["url"], headers=topic["headers"], data=topic["payload"], timeout=15)
+        
+        if response.status_code != 200:
+            print(f"❌ [{topic['name']}] HTTP 状态码: {response.status_code}")
             return None
-        labels = res.json().get('header', {}).get('data', {}).get('label_list', [])
+            
+        data = response.json()
+        labels = data.get('header', {}).get('data', {}).get('label_list', [])
+        
         for label in labels:
-            if '超LIKE' in label.get('text', ''):
-                match = re.search(r'超LIKE\s*(\d+)人', label.get('text', ''))
-                if match: 
+            text = label.get('text', '')
+            if '超LIKE' in text:
+                match = re.search(r'超LIKE\s*(\d+)人', text)
+                if match:
                     return int(match.group(1))
+        return None
+        
     except Exception as e:
-        print(f"⚠️ 获取 [{topic['name']}] 异常: {e}")
-    return None
-
-def save_data(new_record):
-    """读取历史，追加新记录并保存"""
-    history = {"times": [], "series": {name: [] for name in TARGET_NAMES}}
-    
-    if os.path.exists(JSON_FILE):
-        try:
-            with open(JSON_FILE, "r", encoding="utf-8") as f:
-                history = json.load(f)
-        except Exception:
-            pass # 文件损坏则重新创建
-
-    history["times"].append(new_record["time"])
-    for name in TARGET_NAMES:
-        history["series"][name].append(new_record.get(name))
-
-    # 限制历史记录为最近 300 条（防止越跑越大）
-    if len(history["times"]) > 300:
-        history["times"] = history["times"][-300:]
-        for name in TARGET_NAMES:
-            history["series"][name] = history["series"][name][-300:]
-
-    with open(JSON_FILE, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
+        print(f"⚠️ 获取 [{topic['name']}] 时发生异常: {e}")
+        return None
 
 def main():
-    # 强制使用北京时间 (UTC+8)
-    current_time = (datetime.utcnow() + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
+    # 强制使用北京时间 (UTC+8)，适配 GitHub Actions 的服务器时间
+    beijing_now = datetime.utcnow() + timedelta(hours=8)
+    current_time = beijing_now.strftime('%Y-%m-%d %H:%M:%S')
+    
     print(f"🚀 开始抓取: {current_time}")
     
-    new_record = {"time": current_time}
+    row_data = {"time": current_time}
     
-    # 依次抓取
+    # 1. 抓取数据
     for i, topic in enumerate(TOPICS_CONFIG):
-        count = fetch_count(topic)
-        new_record[topic["name"]] = count
-        print(f" - {topic['name']}: {count if count else '❌失败'}")
+        name = topic["name"]
+        count = get_count_from_topic(topic)
         
+        row_data[name] = count
+        
+        if count is not None:
+            print(f"| {name}: {count}人 ")
+        else:
+            print(f"| {name}: ❌失败 ")
+        
+        # 停顿 3-6 秒，防封号
         if i < len(TOPICS_CONFIG) - 1:
-            time.sleep(random.uniform(3, 6)) # 防封
+            time.sleep(random.uniform(3, 6))
 
-    save_data(new_record)
+    # 2. 读取历史 JSON 数据（如果没有则新建）
+    if os.path.exists(JSON_FILE):
+        with open(JSON_FILE, "r", encoding="utf-8") as f:
+            try:
+                history = json.load(f)
+            except:
+                history = {"times": [], "series": {"苏新皓": [], "朱志鑫": [], "陈奕恒": [], "王橹杰": []}}
+    else:
+        history = {"times": [], "series": {"苏新皓": [], "朱志鑫": [], "陈奕恒": [], "王橹杰": []}}
+
+    # 3. 将新数据追加到历史记录中
+    history["times"].append(row_data["time"])
+    for name in ["苏新皓", "朱志鑫", "陈奕恒", "王橹杰"]:
+        history["series"][name].append(row_data.get(name, None))
+
+    # 4. 可选：保留最近 300 次数据，防止 JSON 无限变大
+    if len(history["times"]) > 300:
+        history["times"] = history["times"][-300:]
+        for name in history["series"].keys():
+            history["series"][name] = history["series"][name][-300:]
+
+    # 5. 保存回 JSON 文件
+    with open(JSON_FILE, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+        
     print(f"✅ 数据已成功追加到 {JSON_FILE}")
 
 if __name__ == "__main__":
