@@ -16,19 +16,10 @@
             flex-direction: column;
             padding: 10px;
         }
-        .header {
-            text-align: center;
-            padding: 12px 0 8px;
-            flex-shrink: 0;
-        }
-        .header h1 {
-            font-size: 17px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-        }
+        .header { text-align: center; padding: 12px 0 8px; flex-shrink: 0; }
+        .header h1 { font-size: 17px; font-weight: 700; letter-spacing: 0.5px; }
         .header h1 span { color: #2ECC71; }
         
-        /* 状态栏和标签切换区 */
         .controls {
             display: flex;
             flex-direction: column;
@@ -56,14 +47,13 @@
         .status button:hover { background: #30363d; }
         .status button:disabled { opacity: 0.5; cursor: default; }
 
-        /* 选项卡样式 */
         .tabs {
             display: flex;
             background: #161b22;
             border: 1px solid #30363d;
             border-radius: 8px;
             padding: 3px;
-            width: 240px;
+            width: 260px;
         }
         .tabs button {
             flex: 1;
@@ -77,16 +67,9 @@
             cursor: pointer;
             transition: all 0.2s;
         }
-        .tabs button.active {
-            background: #30363d;
-            color: #fff;
-        }
+        .tabs button.active { background: #30363d; color: #fff; }
 
-        #chart {
-            flex: 1;
-            width: 100%;
-            min-height: 300px;
-        }
+        #chart { flex: 1; width: 100%; min-height: 300px; }
     </style>
 </head>
 <body>
@@ -111,7 +94,6 @@
         const chartDom = document.getElementById('chart');
         const myChart = echarts.init(chartDom, null, { renderer: 'canvas' });
 
-        // 按要求的颜色配置
         const COLORS = {
             "苏新皓": "#FF4D4F", // 红色
             "朱志鑫": "#FAAD14", // 黄色
@@ -120,56 +102,55 @@
         };
         const NAMES = ["苏新皓", "朱志鑫", "陈奕恒", "王橹杰"];
         
-        let currentTab = 'total'; // 'total' | 'delta'
+        let currentTab = 'total';
         let globalData = null;
 
-        // 格式化数字
+        // ★ 修改了这里的格式化函数：移除“万”的缩写，直接显示完整数字（带千分位）
         function formatNum(v) {
             if (v === null || v === undefined) return '-';
-            if (Math.abs(v) >= 1e4) return (v / 1e4).toFixed(1) + '万';
-            return v.toLocaleString();
+            return v.toLocaleString(); 
         }
 
-        // 解析时间字符串 "2024-05-01 12:00:00"
         function parseTime(t) {
+            if (!t) return null;
             const ms = new Date(String(t).replace(' ', 'T')).getTime();
             return isNaN(ms) ? null : ms;
         }
 
-        // 切换选项卡
         function switchTab(tab) {
             if (currentTab === tab) return;
             currentTab = tab;
-            
             document.getElementById('tab-total').classList.toggle('active', tab === 'total');
             document.getElementById('tab-delta').classList.toggle('active', tab === 'delta');
-            
             if (globalData) renderChart();
         }
 
-        // 渲染图表
         function renderChart() {
-            if (!globalData || !globalData.times.length) return;
+            if (!globalData || !globalData.times || globalData.times.length === 0) {
+                myChart.clear();
+                myChart.setOption({
+                    title: { text: '暂无数据，请等待自动抓取或检查 JSON 文件', left: 'center', top: 'center', textStyle: { color: '#8b949e', fontSize: 14 } }
+                });
+                return;
+            }
             
             const data = globalData;
             const rawTimes = data.times;
             const seriesData = data.series;
             
-            // 解析所有时间并找到最新时间点
             const parsedTimes = rawTimes.map(parseTime);
             const validTimes = parsedTimes.filter(t => t !== null);
             if (!validTimes.length) return;
             
             const lastTs = validTimes[validTimes.length - 1];
             
-            // 根据模式决定窗口大小和时间显示
             let startTs, titleText, isDelta;
             if (currentTab === 'total') {
-                startTs = lastTs - 24 * 60 * 60 * 1000; // 24小时
+                startTs = lastTs - 24 * 60 * 60 * 1000;
                 titleText = "近24小时累计数量";
                 isDelta = false;
             } else {
-                startTs = lastTs - 12 * 60 * 60 * 1000; // 12小时
+                startTs = lastTs - 12 * 60 * 60 * 1000;
                 titleText = "近12小时单次增量";
                 isDelta = true;
             }
@@ -177,27 +158,26 @@
             const series = NAMES.map(name => {
                 const values = seriesData[name] || [];
                 const pts = [];
-                let prevVal = null; // 用于计算增量
+                let prevVal = null;
 
                 for (let i = 0; i < parsedTimes.length; i++) {
                     const ts = parsedTimes[i];
-                    if (ts === null || ts < startTs) continue; // 过滤掉窗口外的数据
+                    if (ts === null) continue; 
+                    if (ts < startTs && pts.length > 0) continue; 
                     
                     const val = values[i];
                     const num = (val === null || val === undefined) ? null : Number(val);
 
                     if (isDelta) {
-                        // 增量计算：当前值 - 上一次的有效值
                         if (num !== null && prevVal !== null) {
                             pts.push([ts, num - prevVal]);
                         } else {
-                            pts.push([ts, null]); // 中间断档或首个点不显示增量
+                            pts.push([ts, null]);
                         }
                         if (num !== null) prevVal = num;
                     } else {
-                        // 累计数量直接显示
                         pts.push([ts, num]);
-                        if (num !== null) prevVal = num; // 累计模式下也记录prevVal以防切换
+                        if (num !== null) prevVal = num;
                     }
                 }
 
@@ -205,7 +185,8 @@
                     name: name,
                     type: 'line',
                     smooth: true,
-                    symbol: 'none', // 不显示圆点
+                    symbol: 'circle', 
+                    symbolSize: 5,
                     connectNulls: false,
                     lineStyle: { width: 2.5, color: COLORS[name] },
                     itemStyle: { color: COLORS[name] },
@@ -215,11 +196,7 @@
             });
 
             const option = {
-                title: {
-                    text: titleText,
-                    textStyle: { color: '#8b949e', fontSize: 12 },
-                    top: 0, left: 0
-                },
+                title: { text: titleText, textStyle: { color: '#8b949e', fontSize: 12 }, top: 0, left: 0 },
                 backgroundColor: 'transparent',
                 tooltip: {
                     trigger: 'axis',
@@ -229,10 +206,8 @@
                     axisPointer: { type: 'line', lineStyle: { color: '#30363d' } },
                     formatter: function (params) {
                         if (!params || !params.length) return '';
-                        // 格式化提示框时间
                         const date = new Date(params[0].value[0]);
                         const timeStr = `${date.getMonth()+1}-${date.getDate()} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
-                        
                         let html = `<div style="font-size:12px;color:#8b949e">${timeStr}</div>`;
                         params.forEach(p => {
                             const v = p.value[1];
@@ -245,14 +220,8 @@
                         return html;
                     }
                 },
-                legend: {
-                    data: NAMES,
-                    textStyle: { color: '#c9d1d9', fontSize: 12 },
-                    top: 25, icon: 'circle'
-                },
-                grid: {
-                    left: '10%', right: '5%', bottom: '15%', top: 65, containLabel: true
-                },
+                legend: { data: NAMES, textStyle: { color: '#c9d1d9', fontSize: 12 }, top: 25, icon: 'circle' },
+                grid: { left: '10%', right: '5%', bottom: '15%', top: 65, containLabel: true },
                 xAxis: {
                     type: 'time',
                     min: startTs,
@@ -269,6 +238,7 @@
                 },
                 yAxis: {
                     type: 'value',
+                    scale: true, // ★ 让 Y 轴不从 0 开始，而是根据数据自适应，这样折线变化看起来更明显
                     axisLabel: { color: '#8b949e', fontSize: 10, formatter: formatNum },
                     splitLine: { lineStyle: { color: '#30363d', type: 'dashed' } }
                 },
@@ -279,13 +249,11 @@
             myChart.setOption(option, true);
         }
 
-        // 加载 JSON 数据
         function loadData() {
             const btn = document.getElementById('refresh-btn');
             btn.disabled = true;
             btn.innerText = "加载中";
             
-            // 添加时间戳防止浏览器缓存
             fetch('cloud_data.json?t=' + new Date().getTime())
                 .then(res => {
                     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -295,12 +263,16 @@
                     globalData = data;
                     if (data.times && data.times.length > 0) {
                         document.getElementById('update-time').innerText = '最后更新：' + data.times[data.times.length - 1];
+                    } else {
+                        document.getElementById('update-time').innerText = 'JSON 内无数据';
                     }
                     renderChart();
                 })
                 .catch(err => {
                     console.error('加载失败', err);
-                    document.getElementById('update-time').innerText = '数据加载失败，请稍后重试';
+                    document.getElementById('update-time').innerText = '未找到 cloud_data.json';
+                    myChart.clear();
+                    myChart.setOption({ title: { text: '找不到数据文件，请确认 GitHub Actions 已成功运行并生成 JSON', left: 'center', top: 'center', textStyle: { color: '#FF4D4F', fontSize: 12 } } });
                 })
                 .finally(() => {
                     btn.disabled = false;
@@ -308,12 +280,8 @@
                 });
         }
 
-        // 页面初始化
         loadData();
-        // 自动每 15 分钟刷新一次前端数据
         setInterval(loadData, 15 * 60 * 1000);
-
-        // 窗口尺寸变化时自适应
         window.addEventListener('resize', () => myChart.resize());
     </script>
 </body>
