@@ -6,7 +6,7 @@ import json
 import os
 from datetime import datetime, timedelta
 
-# ================= 配置区（已替换为电脑浏览器 UA 并移除签名） =================
+# ================= 配置区 =================
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 # 1. 苏新皓
@@ -135,9 +135,22 @@ JSON_FILE = "cloud_data.json"
 # ==========================================
 
 def get_count_from_topic(topic):
-    """发送请求并提取单个超话的精确人数（带详细调试）"""
     try:
-        response = requests.post(topic["url"], headers=topic["headers"], data=topic["payload"], timeout=15)
+        # 你的代理地址
+        proxy_url = "https://my-weibo-proxy.2078397070.workers.dev/"
+        
+        request_data = {
+            "url": topic["url"],
+            "headers": topic["headers"],
+            "payload": topic["payload"]
+        }
+        
+        # 向代理发送 JSON 数据
+        response = requests.post(
+            proxy_url, 
+            json=request_data, 
+            timeout=30
+        )
         
         if response.status_code != 200:
             print(f"❌ [{topic['name']}] HTTP 状态码: {response.status_code}")
@@ -145,6 +158,8 @@ def get_count_from_topic(topic):
             return None
             
         data = response.json()
+        
+        # ========== 解析逻辑 ==========
         labels = data.get('header', {}).get('data', {}).get('label_list', [])
         
         if not labels:
@@ -159,7 +174,6 @@ def get_count_from_topic(topic):
                 if match:
                     return int(match.group(1))
                     
-        # 如果遍历完了还没找到
         all_texts = [l.get('text', '') for l in labels]
         print(f"⚠️ [{topic['name']}] 没匹配到超LIKE，现有的标签是: {all_texts}")
         return None
@@ -167,7 +181,7 @@ def get_count_from_topic(topic):
     except Exception as e:
         print(f"⚠️ 获取 [{topic['name']}] 时发生异常: {e}")
         return None
-
+        
 def main():
     # 强制使用北京时间 (UTC+8)，适配 GitHub Actions 的服务器时间
     beijing_now = datetime.utcnow() + timedelta(hours=8)
