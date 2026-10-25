@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>超LIKE实时监控</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+        }
+        .header { text-align: center; padding: 10px 0; flex-shrink: 0; }
+        .header h1 { font-size: 17px; font-weight: 700; }
+        .header h1 span { color: #2ECC71; }
+        .status { font-size: 12px; color: #8b949e; margin-top: 6px; }
+        .chart-box {
+            flex: 1;
+            width: 100%;
+            min-height: 280px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>超LIKE · <span>实时数据追踪</span></h1>
+        <div class="status" id="update-time">加载中...</div>
+    </div>
+    
+    <!-- 图表1：近24小时总人数 -->
+    <div id="chart-total" class="chart-box"></div>
+    
+    <!-- 图表2：近12小时单次增量 -->
+    <div id="chart-delta" class="chart-box"></div>
+
+    <script>
+        const totalChart = echarts.init(document.getElementById('chart-total'));
+        const deltaChart = echarts.init(document.getElementById('chart-delta'));
+
+        // 按要求的颜色配置
+        const COLORS = {
+            "苏新皓": "#FF4D4F", // 红色
+            "朱志鑫": "#FAAD14", // 黄色
+            "陈奕恒": "#9254DE", // 紫色
+            "王橹杰": "#1677FF"  // 蓝色
+        };
+        const NAMES = ["苏新皓", "朱志鑫", "陈奕恒", "王橹杰"];
+
+        function formatVote(v) {
+            if (v === null || v === undefined) return '-';
+            if (Math.abs(v) >= 1e4) return (v / 1e4).toFixed(1) + '万';
+            return v.toLocaleString();
+        }
+
+        function parseTime(t) {
+            const ms = new Date(String(t).replace(' ', 'T')).getTime();
+            return isNaN(ms) ? null : ms;
+        }
+
+        function render(data) {
+            const times = data.times.map(parseTime);
+            const seriesData = data.series;
+            
+            if (!times.length) return;
+
+            const lastTs = times[times.length - 1];
+            
+            // 更新顶部状态
+            document.getElementById('update-time').innerText = '最后更新：' + data.times[data.times.length - 1];
+
+            // ---------- 图表1：近24小时 ----------
+            const totalStartTs = lastTs - 24 * 60 * 60 * 1000;
+            const totalOption = buildOption(data, times, seriesData, totalStartTs, lastTs, false, "近24小时超Like总数");
+            totalChart.setOption(totalOption, true);
+
+            // ---------- 图表2：近12小时增量 ----------
+            const deltaStartTs = lastTs - 12 * 60 * 60 * 1000;
+            const deltaOption = buildOption(data, times, seriesData, deltaStartTs, lastTs, true, "近12小时单次增量");
+            deltaChart.setOption(deltaOption, true);
+        }
+
+        function buildOption(data, times, seriesData, startTs, endTs, isDelta, titleText) {
+            const series = NAMES.map(name => {
+                const values = seriesData[name] || [];
+                const pts = [];
+                let prevVal = null;
+
+                for (let i = 0; i < times.length; i++) {
+                    const ts = times[i];
+                    if (ts === null) continue;
+                    
+                    const val = values[i];
+                    const num = (val === null || val === undefined) ? null : Number(val);
+
+                    if (isDelta) {
+                        // 计算增量：本次 - 上次
+                        if (num !== null && prevVal !== null) {
+                            // 如果跨度太大（比如中间断开过），或者这是时间窗口内的第一个点，就不显示增量
+                            pts.push([ts, num - prevVal]); 
+                        } else {
+                            pts.push([ts, null]);
+                        }
+                        if (num !== null) prevVal = num;
+                    } else {
+                        pts.push([ts, num]);
+                        if (num !== null) prevVal = num;
+                    }
+                }
+
+                return {
+                    name: name,
+                    type: 'line',
+                    smooth: true,
+                    symbol: 'none',
+                    connectNulls: false,
+                    lineStyle: { width: 2, color: COLORS[name] },
+                    itemStyle: { color: COLORS[name] },
+                    areaStyle: isDelta ? { color: COLORS[name], opacity: 0.05 } : undefined,
+                    data: pts
+                };
+            });
+
+            return {
+                title: { text: titleText, textStyle: { color: '#8b949e', fontSize: 12 }, top: 0, left: 0 },
+                backgroundColor: 'transparent',
+                tooltip: {
+                    trigger: 'axis',
+                    backgroundColor: '#161b22',
+                    borderColor: '#30363d',
+                    textStyle: { color: '#c9d1d9' },
+                    formatter: function (params) {
+                        let html = `<div style="font-size:12px;color:#8b949e">${echarts.format.formatTime('yyyy-MM-dd hh:mm', params[0].value[0])}</div>`;
+                        params.forEach(p => {
+                            const v = p.value[1];
+                            const prefix = isDelta && v > 0 ? '+' : '';
+                            html += `<div style="margin-top:4px">
+                                <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:6px;"></span>
+                                ${p.seriesName}: <b>${prefix}${formatVote(v)}</b>
+                            </div>`;
+                        });
+                        return html;
+                    }
+                },
+                legend: { data: NAMES, textStyle: { color: '#c9d1d9', fontSize: 11 }, top: 20, icon: 'circle' },
+                grid: { left: '10%', right: '5%', bottom: '15%', top: 60, containLabel: true },
+                xAxis: {
+                    type: 'time',
+                    min: startTs,
+                    max: endTs,
+                    axisLabel: { 
+                        color: '#8b949e', fontSize: 10, hideOverlap: true,
+                        formatter: function (value) {
+                            const d = new Date(value);
+                            return (d.getMonth()+1) + '-' + d.getDate() + ' ' + d.getHours() + ':' + String(d.getMinutes()).padStart(2,'0');
+                        }
+                    },
+                    axisLine: { lineStyle: { color: '#30363d' } },
+                    splitLine: { show: false }
+                },
+                yAxis: {
+                    type: 'value',
+                    axisLabel: { color: '#8b949e', fontSize: 10, formatter: formatVote },
+                    splitLine: { lineStyle: { color: '#30363d', type: 'dashed' } }
+                },
+                series: series
+            };
+        }
+
+        function loadData() {
+            fetch('cloud_data.json?t=' + new Date().getTime())
+                .then(res => res.json())
+                .then(data => render(data))
+                .catch(err => console.error('加载失败', err));
+        }
+
+        loadData();
+        // 前端页面每 15 分钟自动刷新一次数据
+        setInterval(loadData, 15 * 60 * 1000); 
+        
+        window.addEventListener('resize', () => {
+            totalChart.resize();
+            deltaChart.resize();
+        });
+    </script>
+</body>
+</html>
