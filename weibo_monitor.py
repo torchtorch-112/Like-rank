@@ -6,7 +6,8 @@ import json
 import os
 from datetime import datetime, timedelta
 
-# ================= 配置区（4人已填好） =================
+# ================= 配置区（已替换为电脑浏览器 UA 并移除签名） =================
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 # 1. 苏新皓
 SU_XINHAO_CONFIG = {
@@ -15,11 +16,9 @@ SU_XINHAO_CONFIG = {
     "headers": {
         "host": "api.weibo.cn",
         "authorization": "WB-SUT _2A95H2YCvDeRxGeFH7lQY8CjNyDyIHXVizpNnrDV6PUJbkdAbLWrWkWpNevvXPyW7pRAa24WxSHoCEelvp_jbfDCJ",
-        "x-shanhai-pass": "4.n-m9aXE0rWZ-2KebzsO3OccwAD4",
-        "user-agent": "SM-A5360_15_weibo_16.10.0_android",
+        "user-agent": USER_AGENT,
         "x-log-uid": "7956906130",
         "x-sessionid": "0eda3baa-8bc9-4ad2-a052-1efb6d7c519d",
-        "x-validator": "WlmG2wy91doVxZ53XAPjR+R4FdUu1Jun9M2+fcZl1EA=",
         "accept-encoding": "gzip, deflate, br"
     },
     "payload": {
@@ -44,11 +43,9 @@ ZHU_ZHIXIN_CONFIG = {
     "headers": {
         "host": "api.weibo.cn",
         "authorization": "WB-SUT _2A95H2YCvDeRxGeFH7lQY8CjNyDyIHXVizpNnrDV6PUJbkdAbLWrWkWpNevvXPyW7pRAa24WxSHoCEelvp_jbfDCJ",
-        "x-shanhai-pass": "4.YfUj8HUQYYrDd8O2z2fmKtzc-XI",
-        "user-agent": "SM-A5360_15_weibo_16.10.0_android",
+        "user-agent": USER_AGENT,
         "x-log-uid": "7956906130",
         "x-sessionid": "854f12f6-3af8-4e03-9a01-302a1ca3a798",
-        "x-validator": "bGV49H5OvrqtqnpUDQurTuH9beL/KxJQ03F3W2WX5aI=",
         "accept-encoding": "gzip, deflate, br"
     },
     "payload": {
@@ -79,11 +76,9 @@ CHEN_YIHENG_CONFIG = {
     "headers": {
         "host": "api.weibo.cn",
         "authorization": "WB-SUT _2A95H2YCvDeRxGeFH7lQY8CjNyDyIHXVizpNnrDV6PUJbkdAbLWrWkWpNevvXPyW7pRAa24WxSHoCEelvp_jbfDCJ",
-        "x-shanhai-pass": "4.HdC_yhm7W-fZUBOodUd_gnWzO5Y",
-        "user-agent": "SM-A5360_15_weibo_16.10.0_android",
+        "user-agent": USER_AGENT,
         "x-log-uid": "7956906130",
         "x-sessionid": "a8aff4be-c18d-4463-8b75-cfa21487530e",
-        "x-validator": "3Mbk89wPXy+9SMqReoTXnRafB3OvMF2gsjo4aRwOxQQ=",
         "accept-encoding": "gzip, deflate, br"
     },
     "payload": {
@@ -114,11 +109,9 @@ WANG_LUJIE_CONFIG = {
     "headers": {
         "host": "api.weibo.cn",
         "authorization": "WB-SUT _2A95H2YCvDeRxGeFH7lQY8CjNyDyIHXVizpNnrDV6PUJbkdAbLWrWkWpNevvXPyW7pRAa24WxSHoCEelvp_jbfDCJ",
-        "x-shanhai-pass": "4.RLcbV2kjsKR-1-VlJxsJopwaSqI",
-        "user-agent": "SM-A5360_15_weibo_16.10.0_android",
+        "user-agent": USER_AGENT,
         "x-log-uid": "7956906130",
         "x-sessionid": "9fb3bc69-0c4b-4afa-814f-011e8a92ac3d",
-        "x-validator": "et3gHhe9inO6lMQ+MZzhxy3DwSm9D/fYPtsPNJF9PeI=",
         "accept-encoding": "gzip, deflate, br"
     },
     "payload": {
@@ -142,23 +135,33 @@ JSON_FILE = "cloud_data.json"
 # ==========================================
 
 def get_count_from_topic(topic):
-    """发送请求并提取单个超话的精确人数"""
+    """发送请求并提取单个超话的精确人数（带详细调试）"""
     try:
         response = requests.post(topic["url"], headers=topic["headers"], data=topic["payload"], timeout=15)
         
         if response.status_code != 200:
             print(f"❌ [{topic['name']}] HTTP 状态码: {response.status_code}")
+            print(f"返回内容: {response.text[:150]}")
             return None
             
         data = response.json()
         labels = data.get('header', {}).get('data', {}).get('label_list', [])
         
+        if not labels:
+            print(f"⚠️ [{topic['name']}] 请求成功，但没找到 label_list 数据。可能被风控或参数失效。")
+            print(f"返回内容预览: {str(data)[:150]}")
+            return None
+            
         for label in labels:
             text = label.get('text', '')
             if '超LIKE' in text:
                 match = re.search(r'超LIKE\s*(\d+)人', text)
                 if match:
                     return int(match.group(1))
+                    
+        # 如果遍历完了还没找到
+        all_texts = [l.get('text', '') for l in labels]
+        print(f"⚠️ [{topic['name']}] 没匹配到超LIKE，现有的标签是: {all_texts}")
         return None
         
     except Exception as e:
@@ -170,7 +173,7 @@ def main():
     beijing_now = datetime.utcnow() + timedelta(hours=8)
     current_time = beijing_now.strftime('%Y-%m-%d %H:%M:%S')
     
-    print(f"🚀 开始抓取: {current_time}")
+    print(f"\n========== 🚀 开始抓取: {current_time} ==========")
     
     row_data = {"time": current_time}
     
@@ -182,9 +185,9 @@ def main():
         row_data[name] = count
         
         if count is not None:
-            print(f"| {name}: {count}人 ")
+            print(f"✅ [{name}]: {count}人 ")
         else:
-            print(f"| {name}: ❌失败 ")
+            print(f"❌ [{name}]: 抓取失败 ")
         
         # 停顿 3-6 秒，防封号
         if i < len(TOPICS_CONFIG) - 1:
@@ -215,7 +218,7 @@ def main():
     with open(JSON_FILE, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
         
-    print(f"✅ 数据已成功追加到 {JSON_FILE}")
+    print(f"⭐ 数据已成功追加到 {JSON_FILE}\n")
 
 if __name__ == "__main__":
     main()
