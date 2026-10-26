@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>超LIKE实时监控</title>
+    <title>微博投票实时监控</title>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -11,29 +11,33 @@
         body {
             background-color: #0d1117;
             color: #c9d1d9;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                         "PingFang SC", "Microsoft YaHei", sans-serif;
             display: flex;
             flex-direction: column;
             padding: 10px;
         }
-        .header { text-align: center; padding: 12px 0 8px; flex-shrink: 0; }
-        .header h1 { font-size: 17px; font-weight: 700; letter-spacing: 0.5px; }
-        .header h1 span { color: #2ECC71; }
-        
-        .controls {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 10px;
+        .header {
+            text-align: center;
+            padding: 12px 0 8px;
             flex-shrink: 0;
         }
+        .header h1 {
+            font-size: 17px;
+            font-weight: 700;
+            color: #c9d1d9;
+            letter-spacing: 0.5px;
+        }
+        .header h1 span { color: #2ECC71; }
         .status {
             font-size: 12px;
             color: #8b949e;
+            margin-top: 6px;
             display: flex;
             align-items: center;
+            justify-content: center;
             gap: 10px;
+            flex-wrap: wrap;
         }
         .status button {
             background: #21262d;
@@ -43,160 +47,261 @@
             padding: 2px 10px;
             font-size: 12px;
             cursor: pointer;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
         }
         .status button:hover { background: #30363d; }
         .status button:disabled { opacity: 0.5; cursor: default; }
 
-        .tabs {
-            display: flex;
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 8px;
-            padding: 3px;
-            width: 260px;
+        .mode-switch {
+            display: inline-flex;
+            gap: 0;
         }
-        .tabs button {
-            flex: 1;
-            background: transparent;
-            border: none;
-            color: #8b949e;
-            padding: 6px 0;
-            font-size: 13px;
+        .mode-switch button {
+            border-radius: 0;
+            border-left-width: 0;
+        }
+        .mode-switch button:first-child {
+            border-radius: 6px 0 0 6px;
+            border-left-width: 1px;
+        }
+        .mode-switch button:last-child {
+            border-radius: 0 6px 6px 0;
+        }
+        .mode-switch button.active {
+            background: #2ECC71;
+            color: #0d1117;
+            border-color: #2ECC71;
             font-weight: 600;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: all 0.2s;
         }
-        .tabs button.active { background: #30363d; color: #fff; }
+        .mode-switch button.active:hover {
+            background: #27ae60;
+        }
 
-        #chart { flex: 1; width: 100%; min-height: 300px; }
+        #chart {
+            flex: 2;
+            width: 100%;
+            min-height: 300px;
+        }
+        #gap-chart {
+            flex: 1;
+            width: 100%;
+            min-height: 180px;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>超LIKE · <span>实时数据追踪</span></h1>
-    </div>
-
-    <div class="controls">
-        <div class="tabs">
-            <button id="tab-total" class="active" onclick="switchTab('total')">累计数量 (24h)</button>
-            <button id="tab-delta" onclick="switchTab('delta')">单次增量 (12h)</button>
-        </div>
+        <h1>微博投票 · <span>实时票数追踪</span></h1>
         <div class="status">
             <span id="update-time">加载中...</span>
-            <button id="refresh-btn" onclick="loadData()">刷新</button>
+            <button id="refresh-btn" type="button">刷新</button>
+            <span class="mode-switch">
+                <button id="mode-total" type="button" class="active">累计票数</button>
+                <button id="mode-delta" type="button">单次增量</button>
+            </span>
         </div>
     </div>
-
     <div id="chart"></div>
+    <div id="gap-chart"></div>
 
     <script>
         const chartDom = document.getElementById('chart');
         const myChart = echarts.init(chartDom, null, { renderer: 'canvas' });
+        const gapChart = echarts.init(document.getElementById('gap-chart'), null, { renderer: 'canvas' });
 
         const COLORS = {
-            "苏新皓": "#FF4D4F", // 红色
-            "朱志鑫": "#FAAD14", // 黄色
-            "陈奕恒": "#9254DE", // 紫色
-            "王橹杰": "#1677FF"  // 蓝色
+            "十个勤天": "#A29BFE",
+            "苏新皓":   "#FF6B6B",
+            "朱志鑫":   "#FFD93D"
         };
-        const NAMES = ["苏新皓", "朱志鑫", "陈奕恒", "王橹杰"];
-        
-        let currentTab = 'total';
-        let globalData = null;
+        const ORDER = ["十个勤天", "苏新皓", "朱志鑫"];
+        const HIDDEN = ["张泽禹"];
 
-        // ★ 修改了这里的格式化函数：移除“万”的缩写，直接显示完整数字（带千分位）
-        function formatNum(v) {
+        const REFRESH_INTERVAL = 1 * 60 * 1000;          // 1 分钟轮询一次
+        const HOURS_25 = 25 * 60 * 60 * 1000;            // 累计票数模式：最近 25 小时
+        const HOURS_12 = 12 * 60 * 60 * 1000;            // 单次增量模式：最近 12 小时
+
+        let pollTimer = null;
+        let lastTime = null;
+        let lastData = null;
+        let viewMode = 'total';                          // 'total' 累计票数 | 'delta' 单次增量
+
+        function formatVote(v) {
             if (v === null || v === undefined) return '-';
-            return v.toLocaleString(); 
+            if (Math.abs(v) >= 1e8) return (v / 1e8).toFixed(1) + '亿';
+            if (Math.abs(v) >= 1e4) return (v / 1e4).toFixed(1) + '万';
+            if (Math.abs(v) >= 1e3) return (v / 1e3).toFixed(1) + 'k';
+            return Math.round(v).toLocaleString();
         }
 
         function parseTime(t) {
-            if (!t) return null;
+            if (t === null || t === undefined) return null;
             const ms = new Date(String(t).replace(' ', 'T')).getTime();
             return isNaN(ms) ? null : ms;
         }
 
-        function switchTab(tab) {
-            if (currentTab === tab) return;
-            currentTab = tab;
-            document.getElementById('tab-total').classList.toggle('active', tab === 'total');
-            document.getElementById('tab-delta').classList.toggle('active', tab === 'delta');
-            if (globalData) renderChart();
+        function pad2(n) { return String(n).padStart(2, '0'); }
+
+        function formatTimeLabel(ts, withDate) {
+            const d = new Date(ts);
+            const hm = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+            if (!withDate) return hm;
+            return (d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + hm;
         }
 
-        function renderChart() {
-            if (!globalData || !globalData.times || globalData.times.length === 0) {
-                myChart.clear();
-                myChart.setOption({
-                    title: { text: '暂无数据，请等待自动抓取或检查 JSON 文件', left: 'center', top: 'center', textStyle: { color: '#8b949e', fontSize: 14 } }
-                });
-                return;
-            }
-            
-            const data = globalData;
-            const rawTimes = data.times;
-            const seriesData = data.series;
-            
-            const parsedTimes = rawTimes.map(parseTime);
-            const validTimes = parsedTimes.filter(t => t !== null);
-            if (!validTimes.length) return;
-            
-            const lastTs = validTimes[validTimes.length - 1];
-            
-            let startTs, titleText, isDelta;
-            if (currentTab === 'total') {
-                startTs = lastTs - 24 * 60 * 60 * 1000;
-                titleText = "近24小时累计数量";
-                isDelta = false;
+        function buildPoints(timestamps, values, axisMin) {
+            const pts = [];
+            if (viewMode === 'total') {
+                for (let i = 0; i < timestamps.length; i++) {
+                    const ts = timestamps[i];
+                    if (ts === null) continue;
+                    const v = values[i];
+                    pts.push([ts, (v === null || v === undefined || v === '') ? null : Number(v)]);
+                }
             } else {
-                startTs = lastTs - 12 * 60 * 60 * 1000;
-                titleText = "近12小时单次增量";
-                isDelta = true;
+                let prevV = null;
+                let prevTs = null;
+                for (let i = 0; i < timestamps.length; i++) {
+                    const ts = timestamps[i];
+                    if (ts === null) continue;
+                    const raw = values[i];
+                    const num = (raw === null || raw === undefined || raw === '') ? null : Number(raw);
+
+                    // 数据缺失，重置记录
+                    if (num === null) {
+                        prevV = null;
+                        prevTs = null;
+                        if (ts >= axisMin) pts.push([ts, null]);
+                        continue;
+                    }
+
+                    // ★ 关键逻辑：如果这个点在窗口外，仅作为计算参考，不画出来
+                    if (ts < axisMin) {
+                        prevV = num;
+                        prevTs = ts;
+                        continue; 
+                    }
+
+                    // 在窗口内的点
+                    if (prevV !== null) {
+                        // 如果上一次更新距离本次超过 3 小时（说明中间断档了），就不显示增量，防止出现巨大深渊
+                        if (ts - prevTs > 3 * 60 * 60 * 1000) {
+                            pts.push([ts, null]);
+                        } else {
+                            pts.push([ts, num - prevV]);
+                        }
+                    } else {
+                        pts.push([ts, null]);
+                    }
+                    prevV = num;
+                    prevTs = ts;
+                }
+            }
+            return pts;
+        }
+
+        function renderChart(data) {
+            const rawSeries = data.series || {};
+            let timestamps = (data.times || []).map(parseTime);
+            let seriesData = rawSeries;
+
+            let endTs = null;
+            for (let i = timestamps.length - 1; i >= 0; i--) {
+                if (timestamps[i] !== null) { endTs = timestamps[i]; break; }
             }
 
-            const series = NAMES.map(name => {
-                const values = seriesData[name] || [];
-                const pts = [];
-                let prevVal = null;
+            let axisMin = null, axisMax = null;
 
-                for (let i = 0; i < parsedTimes.length; i++) {
-                    const ts = parsedTimes[i];
-                    if (ts === null) continue; 
-                    if (ts < startTs && pts.length > 0) continue; 
-                    
-                    const val = values[i];
-                    const num = (val === null || val === undefined) ? null : Number(val);
+            if (endTs !== null) {
+                axisMax = endTs;
+                const windowMs = (viewMode === 'delta') ? HOURS_12 : HOURS_25;
+                axisMin = endTs - windowMs;
+                const cutoff = axisMin;
 
-                    if (isDelta) {
-                        if (num !== null && prevVal !== null) {
-                            pts.push([ts, num - prevVal]);
-                        } else {
-                            pts.push([ts, null]);
-                        }
-                        if (num !== null) prevVal = num;
-                    } else {
-                        pts.push([ts, num]);
-                        if (num !== null) prevVal = num;
+                let startIndex = -1;
+                for (let i = 0; i < timestamps.length; i++) {
+                    if (timestamps[i] !== null && timestamps[i] >= cutoff) {
+                        startIndex = i;
+                        break;
                     }
                 }
+                if (startIndex < 0) startIndex = 0;
 
+                // 增量模式下，多保留前一个点用于计算第一个增量
+                if (startIndex > 0 && viewMode === 'delta') startIndex -= 1;
+
+                if (startIndex > 0) {
+                    timestamps = timestamps.slice(startIndex);
+                    const ns = {};
+                    for (const name in rawSeries) {
+                        ns[name] = rawSeries[name].slice(startIndex);
+                    }
+                    seriesData = ns;
+                }
+            }
+
+            const showDate = (axisMin != null && axisMax != null) &&
+                new Date(axisMin).toDateString() !== new Date(axisMax).toDateString();
+
+            const seriesNames = [];
+            ORDER.forEach(n => {
+                if (seriesData[n] && !HIDDEN.includes(n)) seriesNames.push(n);
+            });
+            Object.keys(seriesData).forEach(n => {
+                if (!seriesNames.includes(n) && !HIDDEN.includes(n)) seriesNames.push(n);
+            });
+
+            const isDelta = viewMode === 'delta';
+
+            const series = seriesNames.map(name => {
+                const values = seriesData[name] || [];
+                // 传入 axisMin 用于过滤窗口外的点
+                const pts = buildPoints(timestamps, values, axisMin);
+                const color = COLORS[name] || '#4ECDC4';
                 return {
                     name: name,
                     type: 'line',
                     smooth: true,
-                    symbol: 'circle', 
-                    symbolSize: 5,
+                    symbol: 'none',
                     connectNulls: false,
-                    lineStyle: { width: 2.5, color: COLORS[name] },
-                    itemStyle: { color: COLORS[name] },
-                    areaStyle: isDelta ? { color: COLORS[name], opacity: 0.08 } : undefined,
+                    lineStyle: {
+                        width: 2.5,
+                        color: color,
+                        shadowColor: color,
+                        shadowBlur: isDelta ? 6 : 10
+                    },
+                    itemStyle: { color: color },
+                    emphasis: { focus: 'series' },
+                    areaStyle: isDelta ? {
+                        color: color,
+                        opacity: 0.06
+                    } : undefined,
                     data: pts
                 };
             });
 
+            let yMin = null, yMax = null;
+            if (!isDelta) {
+                let minV = Infinity, maxV = -Infinity;
+                series.forEach(s => {
+                    s.data.forEach(p => {
+                        const v = p[1];
+                        if (v === null || v === undefined || Number.isNaN(v)) return;
+                        if (v < minV) minV = v;
+                        if (v > maxV) maxV = v;
+                    });
+                });
+
+                if (isFinite(minV) && isFinite(maxV)) {
+                    const span = maxV - minV;
+                    const pad = span > 0 ? span * 0.08 : Math.max(Math.abs(maxV) * 0.02, 1);
+                    yMin = Math.max(0, minV - pad);
+                    yMax = maxV + pad;
+                }
+            }
+
             const option = {
-                title: { text: titleText, textStyle: { color: '#8b949e', fontSize: 12 }, top: 0, left: 0 },
                 backgroundColor: 'transparent',
                 tooltip: {
                     trigger: 'axis',
@@ -206,83 +311,249 @@
                     axisPointer: { type: 'line', lineStyle: { color: '#30363d' } },
                     formatter: function (params) {
                         if (!params || !params.length) return '';
-                        const date = new Date(params[0].value[0]);
-                        const timeStr = `${date.getMonth()+1}-${date.getDate()} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
-                        let html = `<div style="font-size:12px;color:#8b949e">${timeStr}</div>`;
+                        const ts = params[0].axisValue;
+                        let html = '<div style="font-size:12px;color:#8b949e">' +
+                                   formatTimeLabel(ts, true) +
+                                   (isDelta ? '　（单次增量）' : '') +
+                                   '</div>';
                         params.forEach(p => {
-                            const v = p.value[1];
-                            const prefix = isDelta && v > 0 ? '+' : '';
+                            const v = Array.isArray(p.value) ? p.value[1] : p.value;
                             html += `<div style="margin-top:4px">
-                                <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:6px;"></span>
-                                ${p.seriesName}: <b>${prefix}${formatNum(v)}</b>
+                                <span style="display:inline-block;width:8px;height:8px;
+                                border-radius:50%;background:${p.color};
+                                margin-right:6px;"></span>
+                                ${p.seriesName}: <b>${formatVote(v)}</b>
                             </div>`;
                         });
                         return html;
                     }
                 },
-                legend: { data: NAMES, textStyle: { color: '#c9d1d9', fontSize: 12 }, top: 25, icon: 'circle' },
-                grid: { left: '10%', right: '5%', bottom: '15%', top: 65, containLabel: true },
+                legend: {
+                    data: seriesNames,
+                    textStyle: { color: '#c9d1d9', fontSize: 12 },
+                    top: 0,
+                    icon: 'circle'
+                },
+                grid: {
+                    left: '8%',
+                    right: '5%',
+                    bottom: '10%',
+                    top: 50,
+                    containLabel: true
+                },
                 xAxis: {
                     type: 'time',
-                    min: startTs,
-                    max: lastTs,
+                    min: axisMin,
+                    max: axisMax,
+                    boundaryGap: false,
                     axisLabel: {
-                        color: '#8b949e', fontSize: 10, hideOverlap: true,
+                        color: '#8b949e',
+                        fontSize: 10,
+                        hideOverlap: true,
                         formatter: function (value) {
-                            const d = new Date(value);
-                            return `${d.getMonth()+1}-${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                            return formatTimeLabel(value, showDate);
                         }
                     },
                     axisLine: { lineStyle: { color: '#30363d' } },
+                    axisTick: { show: false },
                     splitLine: { show: false }
                 },
                 yAxis: {
                     type: 'value',
-                    scale: true, // ★ 让 Y 轴不从 0 开始，而是根据数据自适应，这样折线变化看起来更明显
-                    axisLabel: { color: '#8b949e', fontSize: 10, formatter: formatNum },
-                    splitLine: { lineStyle: { color: '#30363d', type: 'dashed' } }
+                    min: yMin,
+                    max: yMax,
+                    axisLabel: {
+                        color: '#8b949e',
+                        fontSize: 10,
+                        formatter: formatVote
+                    },
+                    axisLine: { show: false },
+                    axisTick: { show: false },
+                    splitLine: {
+                        lineStyle: { color: '#30363d', type: 'dashed' }
+                    }
                 },
                 series: series,
-                animationDuration: 400
+                animationDuration: 500
             };
 
             myChart.setOption(option, true);
+
+            // ---------- 差距图：始终显示累计票差（苏新皓 - 朱志鑫） ----------
+            const suArr  = seriesData['苏新皓'] || [];
+            const zhuArr = seriesData['朱志鑫'] || [];
+            const gapData = [];
+
+            for (let i = 0; i < timestamps.length; i++) {
+                const ts = timestamps[i];
+                if (ts === null) continue;
+
+                // 差距图只要在窗口内的数据
+                if (ts < axisMin) continue;
+
+                const sv = suArr[i];
+                const zv = zhuArr[i];
+
+                if (sv === null || sv === undefined || sv === '' ||
+                    zv === null || zv === undefined || zv === '') {
+                    gapData.push([ts, null]);
+                } else {
+                    gapData.push([ts, Number(sv) - Number(zv)]);
+                }
+            }
+
+            const gapOption = {
+                backgroundColor: 'transparent',
+                tooltip: {
+                    trigger: 'axis',
+                    backgroundColor: '#161b22',
+                    borderColor: '#30363d',
+                    textStyle: { color: '#c9d1d9' },
+                    axisPointer: { type: 'line', lineStyle: { color: '#30363d' } },
+                    formatter: function (params) {
+                        if (!params || !params.length) return '';
+                        const p = params[0];
+                        const ts = p.axisValue;
+                        const diff = Array.isArray(p.value) ? p.value[1] : p.value;
+                        const who = (diff === null || diff === undefined)
+                            ? ''
+                            : (diff >= 0 ? '（苏新皓领先）' : '（朱志鑫领先）');
+                        return `<div style="font-size:12px;color:#8b949e">${formatTimeLabel(ts, true)}</div>
+                                <div style="margin-top:4px">苏新皓 - 朱志鑫：<b>${formatVote(diff)}</b> ${who}</div>`;
+                    }
+                },
+                grid: { left: '8%', right: '5%', bottom: '12%', top: 20, containLabel: true },
+                xAxis: {
+                    type: 'time',
+                    min: axisMin,
+                    max: axisMax,
+                    boundaryGap: false,
+                    axisLabel: {
+                        color: '#8b949e',
+                        fontSize: 10,
+                        hideOverlap: true,
+                        formatter: function (value) {
+                            return formatTimeLabel(value, showDate);
+                        }
+                    },
+                    axisLine: { lineStyle: { color: '#30363d' } },
+                    axisTick: { show: false },
+                    splitLine: { show: false }
+                },
+                yAxis: {
+                    type: 'value',
+                    axisLabel: {
+                        color: '#8b949e',
+                        fontSize: 10,
+                        formatter: function (v) { return formatVote(v); }
+                    },
+                    axisLine: { show: false },
+                    axisTick: { show: false },
+                    splitLine: { lineStyle: { color: '#30363d', type: 'dashed' } }
+                },
+                series: [{
+                    name: '累计票差（苏新皓 - 朱志鑫）',
+                    type: 'line',
+                    smooth: true,
+                    symbol: 'none',
+                    connectNulls: false,
+                    lineStyle: { width: 2.5, color: '#FF6B6B' },
+                    itemStyle: { color: '#FF6B6B' },
+                    areaStyle: { color: 'rgba(255,107,107,0.08)' },
+                    markLine: {
+                        symbol: 'none',
+                        silent: true,
+                        lineStyle: { color: '#8b949e', type: 'dashed', width: 1 },
+                        data: [{ yAxis: 0 }]
+                    },
+                    data: gapData
+                }],
+                animationDuration: 500
+            };
+
+            gapChart.setOption(gapOption, true);
         }
 
-        function loadData() {
+        function setStatus(text) {
+            document.getElementById('update-time').innerText = text;
+        }
+
+        function loadData(isManual) {
             const btn = document.getElementById('refresh-btn');
-            btn.disabled = true;
-            btn.innerText = "加载中";
-            
-            fetch('cloud_data.json?t=' + new Date().getTime())
+            if (isManual) btn.disabled = true;
+
+            return fetch('cloud_data.json', { cache: 'no-cache' })
                 .then(res => {
                     if (!res.ok) throw new Error('HTTP ' + res.status);
                     return res.json();
                 })
                 .then(data => {
-                    globalData = data;
-                    if (data.times && data.times.length > 0) {
-                        document.getElementById('update-time').innerText = '最后更新：' + data.times[data.times.length - 1];
-                    } else {
-                        document.getElementById('update-time').innerText = 'JSON 内无数据';
+                    const last = data.times[data.times.length - 1] || '无数据';
+                    lastData = data;
+
+                    if (last === lastTime) {
+                        setStatus('最后更新：' + last);
+                        return;
                     }
-                    renderChart();
+
+                    lastTime = last;
+                    setStatus('最后更新：' + last);
+                    renderChart(data);
                 })
                 .catch(err => {
-                    console.error('加载失败', err);
-                    document.getElementById('update-time').innerText = '未找到 cloud_data.json';
-                    myChart.clear();
-                    myChart.setOption({ title: { text: '找不到数据文件，请确认 GitHub Actions 已成功运行并生成 JSON', left: 'center', top: 'center', textStyle: { color: '#FF4D4F', fontSize: 12 } } });
+                    console.error('加载失败:', err);
+                    if (lastTime === null) {
+                        setStatus('数据加载失败：' + err.message);
+                    }
                 })
                 .finally(() => {
-                    btn.disabled = false;
-                    btn.innerText = "刷新";
+                    if (isManual) btn.disabled = false;
                 });
         }
 
-        loadData();
-        setInterval(loadData, 15 * 60 * 1000);
-        window.addEventListener('resize', () => myChart.resize());
+        function switchMode(mode) {
+            if (viewMode === mode) return;
+            viewMode = mode;
+
+            document.getElementById('mode-total').classList.toggle('active', mode === 'total');
+            document.getElementById('mode-delta').classList.toggle('active', mode === 'delta');
+
+            if (lastData) renderChart(lastData);
+        }
+
+        document.getElementById('mode-total').addEventListener('click', () => switchMode('total'));
+        document.getElementById('mode-delta').addEventListener('click', () => switchMode('delta'));
+
+        function scheduleNext() {
+            clearTimeout(pollTimer);
+            if (document.hidden) return;
+            pollTimer = setTimeout(async () => {
+                await loadData(false);
+                scheduleNext();
+            }, REFRESH_INTERVAL);
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                loadData(false).finally(scheduleNext);
+            } else {
+                clearTimeout(pollTimer);
+            }
+        });
+
+        document.getElementById('refresh-btn').addEventListener('click', () => {
+            loadData(true).finally(() => {
+                clearTimeout(pollTimer);
+                scheduleNext();
+            });
+        });
+
+        loadData(false).finally(scheduleNext);
+
+        window.addEventListener('resize', () => {
+            myChart.resize();
+            gapChart.resize();
+        });
     </script>
 </body>
 </html>
