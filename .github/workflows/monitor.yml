@@ -3,7 +3,7 @@ name: Auto Monitor Weibo Data
 on:
   schedule:
     # 每 15 分钟运行一次 (GitHub 会有几分钟延迟)
-    - cron: '*/15 * * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch: # 允许你手动点击按钮触发运行
 
 jobs:
